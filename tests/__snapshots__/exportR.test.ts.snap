@@ -9,5 +9,11 @@ rag_questions <- list(
   person_4 = character(0)
 )
 all_questions <- unlist(rag_questions, use.names = FALSE)
+
+# After asking your RAG, save the answers and import answers.csv in the app (step 3), e.g.:
+# answers <- vapply(all_questions, my_rag, character(1))
+# write.csv(data.frame(person = rep(names(rag_questions), lengths(rag_questions)),
+#                      question = all_questions, answer = answers),
+#           "answers.csv", row.names = FALSE, fileEncoding = "UTF-8")
 "
 `;

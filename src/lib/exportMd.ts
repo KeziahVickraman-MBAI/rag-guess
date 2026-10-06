@@ -23,6 +23,10 @@ export function exportTranscriptMd(args: {
     const persona = personaById(p.personId);
     out.push(`## Person ${p.personId} — ${persona.name}`, "");
     out.push(`Notes seen: ${p.retrievedNoteIds.join(", ") || "(not run)"}`, "");
+    out.push("### Questions for the RAG and its answers", "");
+    out.push(p.questions.length
+      ? p.questions.map((q, i) => `${i + 1}. **${q.question}**\n   ${q.answer.trim() || "_(no answer)_"}`).join("\n")
+      : "- (none)", "");
     if (p.rawText) out.push("### Thinking out loud", "", "```", p.rawText.trim(), "```", "");
     const c = p.card;
     if (!c) { out.push("_No card._", ""); continue; }
@@ -35,7 +39,6 @@ export function exportTranscriptMd(args: {
       "### Evidence chain", "",
       list(c.evidence_chain.map((e) => `[${e.note_ids.join(", ")}] ${e.evidence} → ${e.inference}`)), "",
       "### Unknowns", "", list(c.unknowns), "",
-      "### Follow-up questions for the RAG", "", list(c.rag_followup_questions), "",
     );
   }
   if (consensus) {

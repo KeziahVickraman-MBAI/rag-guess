@@ -26,7 +26,9 @@ export interface Session {
 }
 
 export const emptyPerson = (personId: PersonId): PersonState => ({
-  personId, retrievedNoteIds: [], rawText: "", card: null, edited: false, status: "idle",
+  personId, retrievedNoteIds: [],
+  questions: [], qRawText: "", qStatus: "idle",
+  rawText: "", card: null, edited: false, status: "idle",
 });
 
 export const newSession = (settings: Settings = DEFAULT_SETTINGS): Session => ({
@@ -70,9 +72,18 @@ export function parseSession(raw: unknown): Session {
     if (!p) return emptyPerson(id);
     const card = p.card === null || p.card === undefined ? null : coerceCard(p.card);
     const status = p.status === "error" ? "error" : card ? "done" : "idle"; // never restore "running"
+    // Older sessions kept the questions inside the card.
+    const legacy = isObj(p.card) ? strings(p.card.rag_followup_questions) : [];
+    const questions = Array.isArray(p.questions)
+      ? p.questions.filter(isObj).map((q) => ({ question: strOr(q.question, ""), answer: strOr(q.answer, "") }))
+      : legacy.map((question) => ({ question, answer: "" }));
     return {
       personId: id,
       retrievedNoteIds: strings(p.retrievedNoteIds),
+      questions,
+      qRawText: strOr(p.qRawText, ""),
+      qStatus: p.qStatus === "error" ? "error" : questions.length ? "done" : "idle",
+      qError: typeof p.qError === "string" ? p.qError : undefined,
       rawText: strOr(p.rawText, ""),
       card,
       edited: p.edited === true,

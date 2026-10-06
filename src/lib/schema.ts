@@ -22,12 +22,18 @@ export const detectiveCardSchema = {
     },
     confidence: { type: "integer", minimum: 0, maximum: 100 },
     unknowns: { type: "array", items: { type: "string" } },
-    rag_followup_questions: { type: "array", items: { type: "string" } },
   },
   required: [
     "guess", "target_user", "problem_solved", "domain_and_location",
-    "evidence_chain", "confidence", "unknowns", "rag_followup_questions",
+    "evidence_chain", "confidence", "unknowns",
   ],
+} as const;
+
+/** JSON schema for the questions phase. */
+export const questionsSchema = {
+  type: "object",
+  properties: { questions: { type: "array", items: { type: "string" } } },
+  required: ["questions"],
 } as const;
 
 /** JSON schema passed to Ollama `format` for the synthesizer. */
@@ -67,10 +73,11 @@ const str = (v: unknown): string => (typeof v === "string" ? v.trim() : typeof v
 const strArr = (v: unknown): string[] =>
   Array.isArray(v) ? v.map(str).filter((s) => s.length > 0) : typeof v === "string" && v.trim() ? [v.trim()] : [];
 
-/** Pull note IDs like N7 / N07 / [N07] out of whatever the model put there. */
+/** Pull note IDs (N7 / N07 / [N07]) and answer IDs (A1 / [A1]) out of whatever the model put there. */
 export function normalizeNoteIds(v: unknown): string[] {
   const raw = Array.isArray(v) ? v.map(str).join(" ") : str(v);
-  const ids = [...raw.matchAll(/N\s*0*(\d{1,3})/gi)].map((m) => `N${m[1].padStart(2, "0")}`);
+  const ids = [...raw.matchAll(/\b([NA])\s*0*(\d{1,3})/gi)].map(([, kind, n]) =>
+    kind.toUpperCase() === "N" ? `N${n.padStart(2, "0")}` : `A${n}`);
   return [...new Set(ids)];
 }
 
@@ -83,6 +90,9 @@ function coerceEvidence(v: unknown): EvidenceRow[] {
   }));
 }
 
+/** Small models sometimes echo the "A ___ for ___" template back unfilled. */
+export const isRealGuess = (s: string): boolean => s.trim().length > 0 && !/_{2,}/.test(s);
+
 export function coerceCard(v: unknown): DetectiveCard | null {
   if (!isObj(v)) return null;
   const card: DetectiveCard = {
@@ -93,9 +103,8 @@ export function coerceCard(v: unknown): DetectiveCard | null {
     evidence_chain: coerceEvidence(v.evidence_chain),
     confidence: Math.max(0, Math.min(100, Math.round(Number(v.confidence) || 0))),
     unknowns: strArr(v.unknowns),
-    rag_followup_questions: strArr(v.rag_followup_questions).slice(0, 5),
   };
-  return card.guess ? card : null;
+  return isRealGuess(card.guess) ? card : null;
 }
 
 export function coerceSynthesis(v: unknown): SynthesisOutput | null {
@@ -118,10 +127,15 @@ export function coerceSynthesis(v: unknown): SynthesisOutput | null {
     disagreements: strArr(v.disagreements),
     sections,
   };
-  return out.consensus_guess ? out : null;
+  return isRealGuess(out.consensus_guess) ? out : null;
 }
 
 export const emptyCard = (): DetectiveCard => ({
   guess: "", target_user: "", problem_solved: "", domain_and_location: "",
-  evidence_chain: [], confidence: 0, unknowns: [], rag_followup_questions: [],
+  evidence_chain: [], confidence: 0, unknowns: [],
 });
+
+/** 3–5 non-empty questions from the questions pass, or [] if unusable. */
+export function coerceQuestions(v: unknown): string[] {
+  return isObj(v) ? strArr(v.questions).slice(0, 5) : [];
+}

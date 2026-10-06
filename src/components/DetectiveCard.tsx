@@ -1,4 +1,5 @@
 import { useId } from "react";
+import { answerIds } from "../lib/answers";
 import { BLOCK_LABELS } from "../lib/blocks";
 import { ungroundedIds } from "../lib/grounding";
 import type { Persona } from "../lib/personas";
@@ -21,7 +22,8 @@ interface Props {
 export function DetectiveCard({ persona, person, notesSeen, busy, onRun, onCancel, onCardChange }: Props) {
   const running = person.status === "running";
   const card = person.card;
-  const bad = card ? ungroundedIds(card, person.retrievedNoteIds) : new Set<string>();
+  const answered = person.questions.filter((q) => q.answer.trim());
+  const bad = card ? ungroundedIds(card, [...person.retrievedNoteIds, ...answerIds(person)]) : new Set<string>();
   const set = <K extends keyof Card>(k: K, v: Card[K]): void => { if (card) onCardChange({ ...card, [k]: v }); };
   const setRow = (i: number, patch: Partial<EvidenceRow>): void => {
     if (card) set("evidence_chain", card.evidence_chain.map((r, j) => (j === i ? { ...r, ...patch } : r)));
@@ -70,6 +72,22 @@ export function DetectiveCard({ persona, person, notesSeen, busy, onRun, onCance
         </details>
       )}
 
+      {answered.length > 0 && (
+        <details className="rounded-md bg-slate-50 p-2 text-sm">
+          <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-slate-500">
+            RAG answers this person used ({answered.length})
+          </summary>
+          <ol className="mt-2 space-y-2">
+            {answered.map((q, i) => (
+              <li key={i}>
+                <span className="font-mono text-xs text-slate-500">A{i + 1}</span> <strong>{q.question}</strong>
+                <p className="whitespace-pre-wrap text-slate-700">{q.answer}</p>
+              </li>
+            ))}
+          </ol>
+        </details>
+      )}
+
       {!card && !running && person.status === "idle" && (
         <p className="text-sm text-slate-500">Not run yet.</p>
       )}
@@ -100,11 +118,11 @@ export function DetectiveCard({ persona, person, notesSeen, busy, onRun, onCance
                 <li key={i} className="rounded-md border border-slate-200 p-2">
                   <div className="mb-1 flex items-center gap-2">
                     <DraftInput key={row.note_ids.join(",")} aria-label={`Evidence ${i + 1} note IDs`} className={`${inputCls} w-40 font-mono`}
-                      value={row.note_ids.join(", ")} placeholder="N01, N04"
+                      value={row.note_ids.join(", ")} placeholder="N01, A1"
                       onCommit={(v) => setRow(i, { note_ids: normalizeNoteIds(v) })} />
                     <div className="flex flex-1 flex-wrap gap-1">
                       {row.note_ids.map((id) => bad.has(id) ? (
-                        <span key={id} className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700" title="This note was not in the notes this person saw">
+                        <span key={id} className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700" title="Not one of the notes or answers this person saw">
                           {id} · not retrieved
                         </span>
                       ) : (
@@ -131,8 +149,6 @@ export function DetectiveCard({ persona, person, notesSeen, busy, onRun, onCance
           </fieldset>
 
           <StringList label="Unknowns" items={card.unknowns} onChange={(v) => set("unknowns", v)} addLabel="Add unknown" />
-          <StringList label="Follow-up questions for the RAG" items={card.rag_followup_questions}
-            onChange={(v) => set("rag_followup_questions", v)} addLabel="Add question" />
           {person.edited && <p className="text-xs text-slate-400">Edited by you.</p>}
         </div>
       )}

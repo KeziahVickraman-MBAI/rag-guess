@@ -1,7 +1,7 @@
 // ALL prompts live here. Tuned for a 3B model: short, concrete, small context.
 import { BLOCK_LABELS } from "./blocks";
 import type { Persona } from "./personas";
-import type { AiStudioSections, DetectiveCard, Note, PersonId } from "./types";
+import type { AiStudioSections, DetectiveCard, Note, PersonId, QA } from "./types";
 
 export const formatNotes = (notes: Note[]): string =>
   notes.map((n) => `${n.id} | ${n.block} | ${n.text}`).join("\n");
@@ -10,30 +10,61 @@ export function detectiveSystemPrompt(p: Persona): string {
   return `You are ${p.name}, one of four detectives guessing what product or service a startup is building.
 You only see sticky notes from its Business Model Canvas. Your lens: ${p.lensDescription} (${p.lens.map((b) => BLOCK_LABELS[b]).join(", ")}).
 Rules:
-- Use ONLY the notes provided. Cite note IDs like [N07].
+- Use ONLY the notes provided (and the knowledge-base answers, when given). Cite note IDs like [N07].
 - Never invent a product name. Never mention a real brand unless it appears in the notes.
 - Reason as: Evidence [IDs] -> Inference -> Hypothesis.
 - If the notes don't say something, list it under unknowns.`;
 }
 
-export function detectiveUserPrompt(notes: Note[]): string {
+// ---- Phase 1: questions only ----
+
+export function questionsUserPrompt(notes: Note[]): string {
   return `Notes you can see:
 ${formatNotes(notes)}
 
-1. In 3-6 short lines, think out loud: what do these notes suggest?
-2. Give your best one-line guess: "A ___ for ___ that helps them ___".
-3. Write 3-5 follow-up questions to ask a knowledge base built from this canvas.
-   Each must be specific and able to confirm or refute your guess.
+Do NOT guess the product yet.
+1. In 3-5 short lines, think out loud: what do these notes suggest, and what is still unclear?
+2. Write 3-5 follow-up questions to ask a knowledge base built from this canvas.
+   Each must be specific and help you work out what the product is.
    Bad: "What is the app?"  Good: "Which customer segment is listed as primary, and how big are they?"`;
+}
+
+export const QUESTIONS_STRUCTURE_PROMPT =
+  "Now return your 3-5 questions as JSON. Each question under 30 words. Return only JSON.";
+
+// ---- Phase 2: the guess, using the RAG's answers ----
+
+/** Long RAG answers are trimmed so the 3B model's context stays small. */
+const clip = (s: string, words = 80): string => {
+  const w = s.trim().split(/\s+/);
+  return w.length > words ? `${w.slice(0, words).join(" ")}…` : s.trim();
+};
+
+/** Answered questions only, numbered A1, A2, … in the order given. */
+export function formatAnswers(qa: QA[]): string {
+  const answered = qa.filter((x) => x.answer.trim());
+  return answered.length
+    ? answered.map((x, i) => `A${i + 1}. Q: ${x.question}\n    A: ${clip(x.answer)}`).join("\n")
+    : "(No answers yet.)";
+}
+
+export function detectiveUserPrompt(notes: Note[], qa: QA[]): string {
+  return `Notes you can see:
+${formatNotes(notes)}
+
+You asked a knowledge base about this canvas. Its answers (cite them like [A1]):
+${formatAnswers(qa)}
+
+1. In 3-6 short lines, think out loud: what do the notes and answers suggest?
+2. Give your best one-line guess: "A ___ for ___ that helps them ___".`;
 }
 
 /** Second turn: turn the streamed reasoning into the card JSON. */
 export const STRUCTURE_PROMPT = `Now fill in the JSON card from your reasoning above.
 - guess: "A ___ for ___ that helps them ___"
-- evidence_chain: 2-4 rows, each with note_ids you cited, the evidence, and your inference
+- evidence_chain: 2-4 rows, each with the note IDs or answer IDs you cited (like N07 or A1), the evidence, and your inference
 - confidence: 0-100
-- unknowns: what the notes do not tell us
-- rag_followup_questions: 3-5 specific questions
+- unknowns: what the notes and answers still do not tell us
 Return only JSON.`;
 
 export const STRICT_PROMPT =
@@ -62,7 +93,8 @@ export function synthUserPrompt(cards: { personId: PersonId; name: string; card:
   return `Detective cards:
 ${JSON.stringify(compact, null, 1)}
 
-Write the consensus guess ("A ___ for ___ that helps them ___"), where they agree, where they disagree, and fill the prototype sections.`;
+Write the consensus guess as one sentence: "A [kind of product] for [users] that helps them [benefit]", with the brackets replaced by real words.
+Then list where they agree, where they disagree, and fill the prototype sections.`;
 }
 
 const bullets = (items: string[], fallback: string): string =>

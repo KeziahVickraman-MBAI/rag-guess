@@ -1,14 +1,14 @@
 // Orchestrates retrieval, detective generation and synthesis — against Ollama or the mock.
-import { mockDetective, mockStream, mockSynthesis } from "./mock";
+import { mockDetective, mockQuestions, mockStream, mockSynthesis } from "./mock";
 import { chatJSON, chatStream, embed, hasModel, OllamaError, tags, type CallOpts } from "./ollama";
 import { personaById, PERSONAS, type Persona } from "./personas";
 import {
-  detectiveSystemPrompt, detectiveUserPrompt, STRICT_PROMPT, STRUCTURE_PROMPT,
-  SYNTH_SYSTEM_PROMPT, synthUserPrompt,
+  detectiveSystemPrompt, detectiveUserPrompt, QUESTIONS_STRUCTURE_PROMPT, questionsUserPrompt,
+  STRICT_PROMPT, STRUCTURE_PROMPT, SYNTH_SYSTEM_PROMPT, synthUserPrompt,
 } from "./prompts";
 import { retrieveForPersona } from "./retrieve";
-import { coerceCard, coerceSynthesis, detectiveCardSchema, synthesisSchema } from "./schema";
-import type { ChatMessage, DetectiveCard, Note, PersonId, Settings, SynthesisOutput } from "./types";
+import { coerceCard, coerceQuestions, coerceSynthesis, detectiveCardSchema, questionsSchema, synthesisSchema } from "./schema";
+import type { ChatMessage, DetectiveCard, Note, PersonId, QA, Settings, SynthesisOutput } from "./types";
 
 export interface EngineCtx {
   settings: Settings;
@@ -70,54 +70,91 @@ export async function planRetrieval(ctx: EngineCtx, notes: Note[]): Promise<Retr
 
 // ---- Detectives ----
 
+/** Stream the persona's reasoning, then a structured JSON pass; retry once with the strict prompt. */
+async function streamThenJSON<T>(
+  ctx: EngineCtx,
+  persona: Persona,
+  userPrompt: string,
+  structurePrompt: string,
+  format: object,
+  coerce: (v: unknown) => T | null,
+  onToken: (t: string) => void,
+): Promise<{ rawText: string; value: T | null; error?: string }> {
+  const s = ctx.settings;
+  const base: ChatMessage[] = [
+    { role: "system", content: detectiveSystemPrompt(persona) },
+    { role: "user", content: userPrompt },
+  ];
+  const rawText = await chatStream(
+    { ...callOpts(ctx), model: s.chatModel, messages: base, temperature: s.detectiveTemperature },
+    onToken,
+  );
+  const attempts: ChatMessage[][] = [
+    [...base, { role: "assistant", content: rawText }, { role: "user", content: structurePrompt }],
+    [...base, { role: "user", content: STRICT_PROMPT }],
+  ];
+  let lastError = "";
+  for (const messages of attempts) {
+    try {
+      const value = coerce(await chatJSON({ ...callOpts(ctx), model: s.chatModel, messages, temperature: s.detectiveTemperature, format }));
+      if (value) return { rawText, value };
+      lastError = "The model's JSON was missing required fields.";
+    } catch (e) {
+      if (e instanceof OllamaError && e.kind !== "invalid_json") throw e;
+      lastError = e instanceof Error ? e.message : String(e);
+    }
+  }
+  return { rawText, value: null, error: lastError };
+}
+
+export interface QuestionsResult {
+  rawText: string;
+  questions: string[];
+  error?: string;
+}
+
+/** Phase 1: questions for the RAG, no guess. */
+export async function runQuestions(
+  ctx: EngineCtx,
+  persona: Persona,
+  notes: Note[],
+  onToken: (t: string) => void,
+): Promise<QuestionsResult> {
+  if (ctx.settings.mockMode) {
+    const { rawText, questions } = mockQuestions(persona, notes);
+    await mockStream(rawText, onToken, ctx.signal, ctx.mockDelayMs);
+    return { rawText, questions };
+  }
+  const r = await streamThenJSON(ctx, persona, questionsUserPrompt(notes), QUESTIONS_STRUCTURE_PROMPT, questionsSchema,
+    (v) => { const q = coerceQuestions(v); return q.length ? q : null; }, onToken);
+  return r.value
+    ? { rawText: r.rawText, questions: r.value }
+    : { rawText: r.rawText, questions: [], error: `Invalid JSON after retry — type the questions by hand. (${r.error})` };
+}
+
 export interface DetectiveResult {
   rawText: string;
   card: DetectiveCard | null;
   error?: string;
 }
 
-/** Stream reasoning, then a structured JSON pass; retry once with the strict prompt. */
+/** Phase 2: the guess card, from the notes plus the RAG's answers. */
 export async function runDetective(
   ctx: EngineCtx,
   persona: Persona,
   notes: Note[],
+  qa: QA[],
   onToken: (t: string) => void,
 ): Promise<DetectiveResult> {
   if (ctx.settings.mockMode) {
-    const { rawText, card } = mockDetective(persona, notes);
+    const { rawText, card } = mockDetective(persona, notes, qa);
     await mockStream(rawText, onToken, ctx.signal, ctx.mockDelayMs);
     return { rawText, card };
   }
-
-  const s = ctx.settings;
-  const base: ChatMessage[] = [
-    { role: "system", content: detectiveSystemPrompt(persona) },
-    { role: "user", content: detectiveUserPrompt(notes) },
-  ];
-  const rawText = await chatStream(
-    { ...callOpts(ctx), model: s.chatModel, messages: base, temperature: s.detectiveTemperature },
-    onToken,
-  );
-
-  const attempts: ChatMessage[][] = [
-    [...base, { role: "assistant", content: rawText }, { role: "user", content: STRUCTURE_PROMPT }],
-    [...base, { role: "user", content: STRICT_PROMPT }],
-  ];
-  let lastError = "";
-  for (const messages of attempts) {
-    try {
-      const json = await chatJSON({
-        ...callOpts(ctx), model: s.chatModel, messages, temperature: s.detectiveTemperature, format: detectiveCardSchema,
-      });
-      const card = coerceCard(json);
-      if (card) return { rawText, card };
-      lastError = "The model's JSON was missing a guess.";
-    } catch (e) {
-      if (e instanceof OllamaError && e.kind !== "invalid_json") throw e;
-      lastError = e instanceof Error ? e.message : String(e);
-    }
-  }
-  return { rawText, card: null, error: `Invalid JSON after retry — fill the card by hand from the reasoning. (${lastError})` };
+  const r = await streamThenJSON(ctx, persona, detectiveUserPrompt(notes, qa), STRUCTURE_PROMPT, detectiveCardSchema, coerceCard, onToken);
+  return r.value
+    ? { rawText: r.rawText, card: r.value }
+    : { rawText: r.rawText, card: null, error: `Invalid JSON after retry — fill the card by hand from the reasoning. (${r.error})` };
 }
 
 // ---- Synthesis ----

@@ -17,16 +17,26 @@ export interface DetectiveCard {
   evidence_chain: EvidenceRow[];
   confidence: number;
   unknowns: string[];
-  rag_followup_questions: string[];
 }
+
+/** A follow-up question for the R RAG, and its answer once answers.csv is imported. */
+export interface QA { question: string; answer: string; }
+
+export type RunStatus = "idle" | "running" | "done" | "error";
 
 export interface PersonState {
   personId: PersonId;
   retrievedNoteIds: string[];
+  // Phase 1: questions for the RAG
+  questions: QA[];
+  qRawText: string;
+  qStatus: RunStatus;
+  qError?: string;
+  // Phase 2: the guess, made from the notes + the RAG's answers
   rawText: string;
   card: DetectiveCard | null;
   edited: boolean;
-  status: "idle" | "running" | "done" | "error";
+  status: RunStatus;
   error?: string;
 }
 

@@ -5,11 +5,13 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { exportQuestionsR, rString } from "../src/lib/exportR";
 import { emptyCard } from "../src/lib/schema";
+import { emptyPerson } from "../src/lib/store";
 import type { PersonState } from "../src/lib/types";
 
 const person = (personId: 1 | 2 | 3 | 4, qs: string[] | null): PersonState => ({
-  personId, retrievedNoteIds: [], rawText: "", edited: false, status: "done",
-  card: qs ? { ...emptyCard(), guess: "g", rag_followup_questions: qs } : null,
+  ...emptyPerson(personId),
+  questions: (qs ?? []).map((question) => ({ question, answer: "" })),
+  card: qs ? { ...emptyCard(), guess: "g" } : null,
 });
 
 const persons = [
