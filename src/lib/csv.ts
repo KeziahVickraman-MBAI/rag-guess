@@ -1,5 +1,6 @@
 import Papa from "papaparse";
-import { guessBlock, matchBlockTag } from "./blocks";
+import { guessBlock, matchBlockHeading, matchBlockTag } from "./blocks";
+import type { Block } from "./types";
 import type { Note } from "./types";
 
 export class EmptyCsvError extends Error {
@@ -33,6 +34,18 @@ export function stripHtml(s: string): string {
     .replace(/\s+/g, " ")
     .trim();
 }
+
+// Miro frame exports put the template's prompt under each heading ("Who gives us leverage?").
+const PROMPT_LINE = /^(who|what|why|how|where|which|when)\b|\?\s*$/i;
+// Board furniture that isn't a sticky note.
+const NOISE = [
+  /^frame$/i,
+  /business model canvas\s*$/i,
+  /^source:.*strategyzer/i,
+  /^(https?:\/\/\S+[\s,]*)+$/i,
+];
+const isNoise = (t: string): boolean => NOISE.some((re) => re.test(t));
+const dedupeKey = (t: string): string => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 
 export const noteId = (i: number): string => `N${String(i + 1).padStart(2, "0")}`;
 
@@ -77,28 +90,41 @@ export function parseMiroCsv(input: string): ParseResult {
       if (i === textCol) continue;
       const n = nonEmpty(i);
       const matches = body.filter((r) => matchBlockTag(r[i] ?? "") !== null).length;
-      if (n > 0 && matches / n >= 0.6) { tagCol = i; break; }
+      if (n >= body.length / 2 && matches / n >= 0.6) { tagCol = i; break; }
     }
   }
   if (textCol < 0) {
-    // Otherwise pick the column with the longest average text.
-    let bestLen = -1;
+    // Otherwise pick the most filled-in column; break ties by longer average text.
+    // (A single stray cell in column 2 must not win over the real text column.)
+    let best = { filled: 0, avg: -1 };
     for (let i = 0; i < width; i++) {
       if (i === tagCol) continue;
-      const n = nonEmpty(i);
-      if (n === 0) continue;
-      const avg = body.reduce((s, r) => s + stripHtml(r[i] ?? "").length, 0) / n;
-      if (avg > bestLen) { bestLen = avg; textCol = i; }
+      const filled = nonEmpty(i);
+      if (filled === 0) continue;
+      const avg = body.reduce((s, r) => s + stripHtml(r[i] ?? "").length, 0) / filled;
+      if (filled > best.filled || (filled === best.filled && avg > best.avg)) { best = { filled, avg }; textCol = i; }
     }
   }
   if (textCol < 0) throw new EmptyCsvError();
 
   const notes: Note[] = [];
+  const seen = new Set<string>();
+  let section: Block | null = null; // block from the most recent heading row
+  let afterHeading = false;
   for (const r of body) {
     const text = stripHtml(r[textCol] ?? "");
-    if (!text) continue;
+    if (!text || isNoise(text)) continue;
     const tagged = tagCol >= 0 ? matchBlockTag(stripHtml(r[tagCol] ?? "")) : null;
-    notes.push({ id: noteId(notes.length), text, block: tagged ?? guessBlock(text), included: true });
+    if (tagCol < 0) {
+      const heading = matchBlockHeading(text);
+      if (heading) { section = heading; afterHeading = true; continue; }
+      if (afterHeading && PROMPT_LINE.test(text)) { afterHeading = false; continue; }
+      afterHeading = false;
+    }
+    const key = dedupeKey(text);
+    if (seen.has(key)) continue; // Miro often exports the same sticky twice (frame + loose copy)
+    seen.add(key);
+    notes.push({ id: noteId(notes.length), text, block: tagged ?? section ?? guessBlock(text), included: true });
   }
   if (notes.length === 0) throw new EmptyCsvError();
 

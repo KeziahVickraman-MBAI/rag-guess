@@ -24,7 +24,7 @@ const ALIASES: Record<Exclude<Block, "unknown">, string[]> = {
   key_partners: ["keypartners", "keypartner", "partners", "partner", "partnerships", "kp"],
   key_activities: ["keyactivities", "keyactivity", "activities", "activity", "ka"],
   key_resources: ["keyresources", "keyresource", "resources", "resource", "kr"],
-  value_propositions: ["valuepropositions", "valueproposition", "valueprop", "valueprops", "value", "vp", "vps"],
+  value_propositions: ["valuepropositions", "valueproposition", "keypropositions", "keyproposition", "propositions", "valueprop", "valueprops", "value", "vp", "vps"],
   customer_relationships: ["customerrelationships", "customerrelationship", "relationships", "relationship", "cr"],
   channels: ["channels", "channel", "ch"],
   customer_segments: ["customersegments", "customersegment", "segments", "segment", "customers", "cs"],
@@ -43,6 +43,20 @@ export function matchBlockTag(raw: string): Block | null {
     for (const [block, aliases] of Object.entries(ALIASES)) {
       if (aliases.includes(tag)) return block as Block;
     }
+  }
+  return null;
+}
+
+/**
+ * A row that is itself a block title (Miro frame export: "Key Partners", "Customer segments").
+ * Only short rows count, so a note that merely mentions "channels" isn't mistaken for a heading.
+ */
+export function matchBlockHeading(text: string): Block | null {
+  const t = text.trim().replace(/[:.]$/, "");
+  if (!t || t.split(/\s+/).length > 4) return null;
+  const tag = normalizeTag(t);
+  for (const [block, aliases] of Object.entries(ALIASES)) {
+    if (aliases.includes(tag)) return block as Block;
   }
   return null;
 }

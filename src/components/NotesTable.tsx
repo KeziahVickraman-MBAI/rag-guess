@@ -24,7 +24,7 @@ export function NotesTable({ notes, onChange }: { notes: Note[]; onChange: (note
               </td>
               <td className="px-2 py-1 font-mono text-xs text-slate-500">{n.id}</td>
               <td className="px-2 py-1">
-                <select aria-label={`Block for note ${n.id}`} className={`${inputCls} w-48`} value={n.block}
+                <select aria-label={`Block for note ${n.id}`} className={`${inputCls} min-w-48`} value={n.block}
                   onChange={(e) => update(n.id, { block: e.target.value as Note["block"] })}>
                   {BLOCKS.map((b) => <option key={b} value={b}>{BLOCK_LABELS[b]}</option>)}
                 </select>

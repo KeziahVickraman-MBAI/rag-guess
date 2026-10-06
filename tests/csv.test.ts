@@ -50,6 +50,29 @@ describe("parseMiroCsv", () => {
     expect(r.notes[0].block).toBe("channels");
   });
 
+  it("reads a Miro frame export: heading rows, prompt lines, a stray second column, duplicates", () => {
+    const r = parseMiroCsv(readFileSync(new URL("./fixtures/miro_frames.csv", import.meta.url), "utf8"));
+    expect(r.textColumn).toBe("Column 1");
+    expect(r.notes).toHaveLength(47);
+    expect(r.notes.every((n) => n.block !== "unknown")).toBe(true);
+    expect(r.notes[0].block).toBe("value_propositions"); // "Key propositions" heading
+    const texts = r.notes.map((n) => n.text);
+    // Headings, template prompts, frame labels and canvas credits are not notes.
+    for (const junk of ["Key partners", "Who gives us leverage?", "Frame", "FanFlow Business Model Canvas"]) {
+      expect(texts).not.toContain(junk);
+    }
+    expect(texts.some((t) => /strategyzer|creativecommons/i.test(t))).toBe(false);
+    // The frame copy of a sticky that already appeared (only punctuation differs) is dropped.
+    expect(texts.filter((t) => t.startsWith("football-data.org and TheSportsDB as data providers"))).toHaveLength(1);
+    expect(r.notes.find((n) => n.text === "Hosting on Vercel: SGD 0-30 monthly")?.block).toBe("cost_structure");
+    expect(r.notes.find((n) => n.text === "How we earn.")).toBeUndefined();
+  });
+
+  it("does not treat a note that mentions a block as a heading", () => {
+    const r = parseMiroCsv("Channels\nWho we reach?\nWeb dashboard and channels for partners\n");
+    expect(r.notes).toEqual([{ id: "N01", text: "Web dashboard and channels for partners", block: "channels", included: true }]);
+  });
+
   it("throws EmptyCsvError for empty input", () => {
     expect(() => parseMiroCsv("")).toThrow(EmptyCsvError);
     expect(() => parseMiroCsv("Content,Tags\n,\n")).toThrow(EmptyCsvError);
