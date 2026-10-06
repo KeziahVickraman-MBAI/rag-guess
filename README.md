@@ -30,7 +30,7 @@ Ollama already allows `http://localhost` origins, so `npm run dev` works with no
 
 | OS | Command |
 |---|---|
-| macOS | `launchctl setenv OLLAMA_ORIGINS "https://<your-app>.vercel.app"` then quit and reopen Ollama |
+| macOS | `launchctl setenv OLLAMA_ORIGINS "https://<your-app>.vercel.app"` then `pkill -f Ollama; sleep 2; open -a Ollama` (repeat after a reboot) |
 | Windows (PowerShell) | `setx OLLAMA_ORIGINS "https://<your-app>.vercel.app"` then restart Ollama |
 | Linux | `OLLAMA_ORIGINS="https://<your-app>.vercel.app" ollama serve` |
 

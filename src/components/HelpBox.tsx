@@ -8,7 +8,11 @@ export function HelpBox({ chatModel, embedModel }: { chatModel: string; embedMod
         <li>
           <p>Allow this site to call Ollama (CORS), then <strong>quit and restart Ollama</strong>:</p>
           <p className="mt-1 text-xs font-semibold">macOS</p>
-          <code className={code}>launchctl setenv OLLAMA_ORIGINS "{origin}"</code>
+          <code className={code}>{`launchctl setenv OLLAMA_ORIGINS "${origin}"\npkill -f Ollama; sleep 2; open -a Ollama`}</code>
+          <p className="mt-1 text-xs text-slate-600">
+            The second line restarts Ollama. Without a restart, Ollama keeps its old settings and keeps blocking this site.
+            <code> launchctl setenv</code> is cleared when you reboot, so run both lines again after a restart.
+          </p>
           <p className="mt-1 text-xs font-semibold">Windows (PowerShell)</p>
           <code className={code}>setx OLLAMA_ORIGINS "{origin}"</code>
           <p className="mt-1 text-xs font-semibold">Linux</p>
