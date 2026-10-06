@@ -1,0 +1,13 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`R export > matches the snapshot 1`] = `
+"# BMC Detective — generated 2026-10-06T10:00:00Z from board_a.csv
+rag_questions <- list(
+  person_1 = c("Which \\"primary\\" segment?", "Path C:\\\\data\\\\x?", "Two lines?"),
+  person_2 = c("Tamil: தமிழ், Swahili: Habari, arrow ↔"),
+  person_3 = character(0),
+  person_4 = character(0)
+)
+all_questions <- unlist(rag_questions, use.names = FALSE)
+"
+`;
