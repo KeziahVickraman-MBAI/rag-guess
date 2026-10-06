@@ -15,14 +15,22 @@ export const DEFAULT_SETTINGS: Settings = {
   mockMode: false,
 };
 
+/** One run of the four detectives plus their consensus. */
+export interface Run {
+  persons: PersonState[];
+  consensus: Consensus | null;
+}
+
 export interface Session {
   version: 1;
   fileName: string;
   notes: Note[];
+  revealed: boolean;      // notes table shown? hidden by default so players can't peek
   redactTerms: string;
   settings: Settings;
-  persons: PersonState[];
+  persons: PersonState[]; // tab 1: questions first (blind detectives)
   consensus: Consensus | null;
+  sim: Run;               // tab 2: the entire simulation (detectives read the notes)
 }
 
 export const emptyPerson = (personId: PersonId): PersonState => ({
@@ -31,14 +39,18 @@ export const emptyPerson = (personId: PersonId): PersonState => ({
   rawText: "", card: null, edited: false, status: "idle",
 });
 
+export const emptyPersons = (): PersonState[] => ([1, 2, 3, 4] as const).map(emptyPerson);
+
 export const newSession = (settings: Settings = DEFAULT_SETTINGS): Session => ({
   version: 1,
   fileName: "",
   notes: [],
+  revealed: false,
   redactTerms: "",
   settings,
-  persons: ([1, 2, 3, 4] as const).map(emptyPerson),
+  persons: emptyPersons(),
   consensus: null,
+  sim: { persons: emptyPersons(), consensus: null },
 });
 
 type Obj = Record<string, unknown>;
@@ -46,6 +58,46 @@ const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !
 const strOr = (v: unknown, d: string): string => (typeof v === "string" ? v : d);
 const numOr = (v: unknown, d: number): number => (typeof v === "number" && Number.isFinite(v) ? v : d);
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+
+function parsePersons(v: unknown): PersonState[] {
+  const rawPersons = Array.isArray(v) ? v.filter(isObj) : [];
+  return ([1, 2, 3, 4] as const).map((id): PersonState => {
+    const p = rawPersons.find((x) => x.personId === id);
+    if (!p) return emptyPerson(id);
+    const card = p.card === null || p.card === undefined ? null : coerceCard(p.card);
+    const status = p.status === "error" ? "error" : card ? "done" : "idle"; // never restore "running"
+    // Older sessions kept the questions inside the card.
+    const legacy = isObj(p.card) ? strings(p.card.rag_followup_questions) : [];
+    const questions = Array.isArray(p.questions)
+      ? p.questions.filter(isObj).map((q) => ({ question: strOr(q.question, ""), answer: strOr(q.answer, "") }))
+      : legacy.map((question) => ({ question, answer: "" }));
+    return {
+      personId: id,
+      retrievedNoteIds: strings(p.retrievedNoteIds),
+      questions,
+      qRawText: strOr(p.qRawText, ""),
+      // Keep the saved status; "running" (or missing) is settled from whether there are questions.
+      qStatus: p.qStatus === "error" || p.qStatus === "done" || p.qStatus === "idle" ? p.qStatus : questions.length ? "done" : "idle",
+      qError: typeof p.qError === "string" ? p.qError : undefined,
+      rawText: strOr(p.rawText, ""),
+      card,
+      edited: p.edited === true,
+      status,
+      error: typeof p.error === "string" ? p.error : undefined,
+    };
+  });
+}
+
+function parseConsensus(c: unknown): Consensus | null {
+  return isObj(c)
+    ? {
+        consensus_guess: strOr(c.consensus_guess, ""),
+        agreements: strings(c.agreements),
+        disagreements: strings(c.disagreements),
+        aiStudioPrompt: strOr(c.aiStudioPrompt, ""),
+      }
+    : null;
+}
 
 /** Validate an unknown blob (localStorage or imported session.json). Throws on garbage. */
 export function parseSession(raw: unknown): Session {
@@ -66,41 +118,18 @@ export function parseSession(raw: unknown): Session {
     block: BLOCKS.includes(n.block as Note["block"]) ? (n.block as Note["block"]) : "unknown",
     included: n.included !== false,
   })).filter((n) => n.id);
-  const rawPersons = Array.isArray(raw.persons) ? raw.persons.filter(isObj) : [];
-  const persons = ([1, 2, 3, 4] as const).map((id): PersonState => {
-    const p = rawPersons.find((x) => x.personId === id);
-    if (!p) return emptyPerson(id);
-    const card = p.card === null || p.card === undefined ? null : coerceCard(p.card);
-    const status = p.status === "error" ? "error" : card ? "done" : "idle"; // never restore "running"
-    // Older sessions kept the questions inside the card.
-    const legacy = isObj(p.card) ? strings(p.card.rag_followup_questions) : [];
-    const questions = Array.isArray(p.questions)
-      ? p.questions.filter(isObj).map((q) => ({ question: strOr(q.question, ""), answer: strOr(q.answer, "") }))
-      : legacy.map((question) => ({ question, answer: "" }));
-    return {
-      personId: id,
-      retrievedNoteIds: strings(p.retrievedNoteIds),
-      questions,
-      qRawText: strOr(p.qRawText, ""),
-      qStatus: p.qStatus === "error" ? "error" : questions.length ? "done" : "idle",
-      qError: typeof p.qError === "string" ? p.qError : undefined,
-      rawText: strOr(p.rawText, ""),
-      card,
-      edited: p.edited === true,
-      status,
-      error: typeof p.error === "string" ? p.error : undefined,
-    };
-  });
-  const c = raw.consensus;
-  const consensus: Consensus | null = isObj(c)
-    ? {
-        consensus_guess: strOr(c.consensus_guess, ""),
-        agreements: strings(c.agreements),
-        disagreements: strings(c.disagreements),
-        aiStudioPrompt: strOr(c.aiStudioPrompt, ""),
-      }
-    : null;
-  return { version: 1, fileName: strOr(raw.fileName, ""), notes, redactTerms: strOr(raw.redactTerms, ""), settings, persons, consensus };
+  const sim = isObj(raw.sim) ? raw.sim : {};
+  return {
+    version: 1,
+    fileName: strOr(raw.fileName, ""),
+    notes,
+    revealed: raw.revealed === true,
+    redactTerms: strOr(raw.redactTerms, ""),
+    settings,
+    persons: parsePersons(raw.persons),
+    consensus: parseConsensus(raw.consensus),
+    sim: { persons: parsePersons(sim.persons), consensus: parseConsensus(sim.consensus) },
+  };
 }
 
 function loadSession(): Session {

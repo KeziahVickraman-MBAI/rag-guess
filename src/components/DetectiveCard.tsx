@@ -4,7 +4,7 @@ import { BLOCK_LABELS } from "../lib/blocks";
 import { ungroundedIds } from "../lib/grounding";
 import type { Persona } from "../lib/personas";
 import { emptyCard, normalizeNoteIds } from "../lib/schema";
-import type { DetectiveCard as Card, EvidenceRow, Note, PersonState } from "../lib/types";
+import type { DetectiveCard as Card, EvidenceRow, Note, PersonState, QA } from "../lib/types";
 import { Button, DraftInput, inputCls, move, RowControls, StringList, TextField } from "./ui";
 
 const COLORS = ["border-sky-400", "border-emerald-400", "border-amber-400", "border-violet-400"];
@@ -17,9 +17,11 @@ interface Props {
   onRun: () => void;
   onCancel: () => void;
   onCardChange: (card: Card) => void;
+  /** Simulation tab: the card's own follow-up questions for the RAG, editable. */
+  onQuestionsChange?: (qs: QA[]) => void;
 }
 
-export function DetectiveCard({ persona, person, notesSeen, busy, onRun, onCancel, onCardChange }: Props) {
+export function DetectiveCard({ persona, person, notesSeen, busy, onRun, onCancel, onCardChange, onQuestionsChange }: Props) {
   const running = person.status === "running";
   const card = person.card;
   const answered = person.questions.filter((q) => q.answer.trim());
@@ -149,6 +151,10 @@ export function DetectiveCard({ persona, person, notesSeen, busy, onRun, onCance
           </fieldset>
 
           <StringList label="Unknowns" items={card.unknowns} onChange={(v) => set("unknowns", v)} addLabel="Add unknown" />
+          {onQuestionsChange && (
+            <StringList label="Follow-up questions for the RAG" items={person.questions.map((q) => q.question)}
+              onChange={(v) => onQuestionsChange(v.map((question) => ({ question, answer: "" })))} addLabel="Add question" />
+          )}
           {person.edited && <p className="text-xs text-slate-400">Edited by you.</p>}
         </div>
       )}

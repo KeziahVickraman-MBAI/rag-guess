@@ -18,9 +18,11 @@ interface Props {
   onLoad: (fileName: string, notes: Note[]) => void;
   onNotesChange: (notes: Note[]) => void;
   onRedactChange: (terms: string) => void;
+  revealed: boolean;
+  onRevealedChange: (revealed: boolean) => void;
 }
 
-export function UploadStep({ fileName, notes, redactTerms, onLoad, onNotesChange, onRedactChange }: Props) {
+export function UploadStep({ fileName, notes, redactTerms, onLoad, onNotesChange, onRedactChange, revealed, onRevealedChange }: Props) {
   const [info, setInfo] = useState<string>("");
   const [error, setError] = useState<string>("");
   const fileId = useId();
@@ -31,7 +33,7 @@ export function UploadStep({ fileName, notes, redactTerms, onLoad, onNotesChange
       const r = parseMiroCsv(text);
       onLoad(name, r.notes);
       setError("");
-      setInfo(`Loaded ${r.notes.length} notes. Text column: "${r.textColumn}". Block column: ${r.tagColumn ? `"${r.tagColumn}"` : "none (guessed from keywords)"}.`);
+      setInfo(`Text column: "${r.textColumn}". Block column: ${r.tagColumn ? `"${r.tagColumn}"` : "none (blocks read from headings or keywords)"}.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -62,11 +64,28 @@ export function UploadStep({ fileName, notes, redactTerms, onLoad, onNotesChange
         <span className="text-sm text-slate-500">or try a sample:</span>
         {SAMPLES.map((s) => <Button key={s.file} onClick={() => loadSample(s.file)}>{s.label}</Button>)}
       </div>
-      {fileName && <p className="text-sm text-slate-600">Current board: <strong>{fileName}</strong> {info && `— ${info}`}</p>}
+      {fileName && (
+        <p className="text-sm text-slate-600">
+          Current board: <strong>{fileName}</strong> — {notes.length} notes loaded.{revealed && info && ` ${info}`}
+        </p>
+      )}
       {error && <p role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p>}
 
-      {notes.length > 0 && (
+      {notes.length > 0 && !revealed && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4">
+          <span aria-hidden className="text-2xl">🙈</span>
+          <p className="flex-1 text-sm text-slate-600">
+            The canvas is hidden so nobody sees it before the detectives have asked their questions.
+          </p>
+          <Button variant="primary" onClick={() => onRevealedChange(true)}>Reveal</Button>
+        </div>
+      )}
+
+      {notes.length > 0 && revealed && (
         <>
+          <div className="flex justify-end">
+            <Button variant="ghost" onClick={() => onRevealedChange(false)}>Hide the canvas</Button>
+          </div>
           {unknown > 0.3 && (
             <p role="alert" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
               ⚠ {Math.round(unknown * 100)}% of included notes have block <strong>Unknown</strong>. The detectives rely on blocks to

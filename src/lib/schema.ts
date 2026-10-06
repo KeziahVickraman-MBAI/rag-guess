@@ -29,6 +29,16 @@ export const detectiveCardSchema = {
   ],
 } as const;
 
+/** Simulation tab: the card plus follow-up questions, in one structured pass. */
+export const simCardSchema = {
+  ...detectiveCardSchema,
+  properties: {
+    ...detectiveCardSchema.properties,
+    rag_followup_questions: { type: "array", items: { type: "string" } },
+  },
+  required: [...detectiveCardSchema.required, "rag_followup_questions"],
+} as const;
+
 /** JSON schema for the questions phase. */
 export const questionsSchema = {
   type: "object",
@@ -134,6 +144,12 @@ export const emptyCard = (): DetectiveCard => ({
   guess: "", target_user: "", problem_solved: "", domain_and_location: "",
   evidence_chain: [], confidence: 0, unknowns: [],
 });
+
+/** Simulation tab output: card + its follow-up questions. */
+export function coerceSimCard(v: unknown): { card: DetectiveCard; questions: string[] } | null {
+  const card = coerceCard(v);
+  return card && isObj(v) ? { card, questions: strArr(v.rag_followup_questions).slice(0, 5) } : null;
+}
 
 /** 3–5 non-empty questions from the questions pass, or [] if unusable. */
 export function coerceQuestions(v: unknown): string[] {

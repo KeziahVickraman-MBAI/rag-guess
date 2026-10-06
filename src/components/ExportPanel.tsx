@@ -1,6 +1,5 @@
 import { useId, useState } from "react";
 import { exportTranscriptMd } from "../lib/exportMd";
-import { exportQuestionsR } from "../lib/exportR";
 import { parseTerms } from "../lib/redact";
 import { downloadText, parseSession, type Session } from "../lib/store";
 import { Button } from "./ui";
@@ -13,15 +12,15 @@ export function ExportPanel({ session, onImport, onReset }: { session: Session; 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap gap-2">
-        <Button variant="primary" onClick={() => downloadText("questions.R", exportQuestionsR(session.persons, session.fileName))}>
-          Download questions.R
-        </Button>
-        <Button onClick={() => downloadText(`${base}_session.json`, JSON.stringify(session, null, 2), "application/json")}>
+        <Button variant="primary" onClick={() => downloadText(`${base}_session.json`, JSON.stringify(session, null, 2), "application/json")}>
           Download session.json
         </Button>
         <Button onClick={() => downloadText(`${base}_transcript.md`, exportTranscriptMd({
           fileName: session.fileName, notes: session.notes, redactTerms: parseTerms(session.redactTerms),
-          persons: session.persons, consensus: session.consensus,
+          runs: [
+            { title: "Questions first", persons: session.persons, consensus: session.consensus },
+            { title: "Entire simulation", persons: session.sim.persons, consensus: session.sim.consensus },
+          ],
         }), "text/markdown")}>
           Download transcript.md
         </Button>
@@ -47,7 +46,7 @@ export function ExportPanel({ session, onImport, onReset }: { session: Session; 
       </div>
       {msg && <p role="status" className="text-sm text-slate-600">{msg}</p>}
       <p className="text-xs text-slate-500">
-        In R: <code>source("questions.R")</code> gives you <code>rag_questions</code> (per person) and <code>all_questions</code>. Your session autosaves in this browser.
+        Saves both tabs. Your session also autosaves in this browser. Each tab has its own <code>questions.R</code> download.
       </p>
     </div>
   );

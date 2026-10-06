@@ -6,33 +6,37 @@ import type { AiStudioSections, DetectiveCard, Note, PersonId, QA } from "./type
 export const formatNotes = (notes: Note[]): string =>
   notes.map((n) => `${n.id} | ${n.block} | ${n.text}`).join("\n");
 
-export function detectiveSystemPrompt(p: Persona): string {
-  return `You are ${p.name}, one of four detectives guessing what product or service a startup is building.
-You only see sticky notes from its Business Model Canvas. Your lens: ${p.lensDescription} (${p.lens.map((b) => BLOCK_LABELS[b]).join(", ")}).
+const lensBlocks = (p: Persona): string => p.lens.map((b) => BLOCK_LABELS[b]).join(", ");
+
+export const STRICT_PROMPT =
+  "Return only JSON matching the schema. Use only what you were given above. Keep each string under 30 words.";
+
+// =====================================================================
+// Tab 1 — Questions first. The detectives never see the canvas: they
+// question a knowledge base built from it, then guess from the answers.
+// =====================================================================
+
+export function blindSystemPrompt(p: Persona): string {
+  return `You are ${p.name}, one of four detectives working out what product or service a startup is building.
+You CANNOT see the startup's Business Model Canvas. You can only ask questions to a knowledge base built from it.
+Your lens: ${p.lensDescription} (${lensBlocks(p)}).
 Rules:
-- Use ONLY the notes provided (and the knowledge-base answers, when given). Cite note IDs like [N07].
-- Never invent a product name. Never mention a real brand unless it appears in the notes.
-- Reason as: Evidence [IDs] -> Inference -> Hypothesis.
-- If the notes don't say something, list it under unknowns.`;
+- Assume nothing about the product. Use only the knowledge base's answers.
+- Never invent a product name. Never mention a real brand unless an answer mentions it.`;
 }
 
-// ---- Phase 1: questions only ----
-
-export function questionsUserPrompt(notes: Note[]): string {
-  return `Notes you can see:
-${formatNotes(notes)}
-
-Do NOT guess the product yet.
-1. In 3-5 short lines, think out loud: what do these notes suggest, and what is still unclear?
-2. Write 3-5 follow-up questions to ask a knowledge base built from this canvas.
-   Each must be specific and help you work out what the product is.
-   Bad: "What is the app?"  Good: "Which customer segment is listed as primary, and how big are they?"`;
+export function blindQuestionsUserPrompt(p: Persona): string {
+  return `You know nothing about the product yet.
+1. In 2-3 short lines, think out loud: what do you need to find out through your lens?
+2. Write 3-5 questions to ask the knowledge base.
+   - Each must be answerable from a Business Model Canvas, especially ${lensBlocks(p)}.
+   - Start broad, then get more specific.
+   - Each should help reveal what the product is, who it is for, or how it works.
+   Bad: "What is the app called?"  Good: "Which customer segment is listed as primary, and where are they located?"`;
 }
 
 export const QUESTIONS_STRUCTURE_PROMPT =
   "Now return your 3-5 questions as JSON. Each question under 30 words. Return only JSON.";
-
-// ---- Phase 2: the guess, using the RAG's answers ----
 
 /** Long RAG answers are trimmed so the 3B model's context stays small. */
 const clip = (s: string, words = 80): string => {
@@ -48,27 +52,59 @@ export function formatAnswers(qa: QA[]): string {
     : "(No answers yet.)";
 }
 
-export function detectiveUserPrompt(notes: Note[], qa: QA[]): string {
+export function blindGuessUserPrompt(qa: QA[]): string {
+  return `You asked the knowledge base. Its answers (cite them like [A1]):
+${formatAnswers(qa)}
+
+1. In 3-6 short lines, think out loud: what do these answers suggest? Reason as: Evidence [A#] -> Inference -> Hypothesis.
+2. Give your best one-line guess: "A ___ for ___ that helps them ___".`;
+}
+
+export const BLIND_STRUCTURE_PROMPT = `Now fill in the JSON card from your reasoning above.
+- guess: one sentence "A [kind of product] for [users] that helps them [benefit]" with real words
+- evidence_chain: 2-4 rows, each with the answer IDs you cited (like A1), the evidence, and your inference
+- confidence: 0-100
+- unknowns: what the answers still do not tell us
+Return only JSON.`;
+
+// =====================================================================
+// Tab 2 — Run the entire simulation. The detectives read the notes
+// directly, guess, and propose follow-up questions for the RAG.
+// =====================================================================
+
+export function detectiveSystemPrompt(p: Persona): string {
+  return `You are ${p.name}, one of four detectives guessing what product or service a startup is building.
+You only see sticky notes from its Business Model Canvas. Your lens: ${p.lensDescription} (${lensBlocks(p)}).
+Rules:
+- Use ONLY the notes provided. Cite note IDs like [N07].
+- Never invent a product name. Never mention a real brand unless it appears in the notes.
+- Reason as: Evidence [IDs] -> Inference -> Hypothesis.
+- If the notes don't say something, list it under unknowns.`;
+}
+
+export function detectiveUserPrompt(notes: Note[]): string {
   return `Notes you can see:
 ${formatNotes(notes)}
 
-You asked a knowledge base about this canvas. Its answers (cite them like [A1]):
-${formatAnswers(qa)}
-
-1. In 3-6 short lines, think out loud: what do the notes and answers suggest?
-2. Give your best one-line guess: "A ___ for ___ that helps them ___".`;
+1. In 3-6 short lines, think out loud: what do these notes suggest?
+2. Give your best one-line guess: "A ___ for ___ that helps them ___".
+3. Write 3-5 follow-up questions to ask a knowledge base built from this canvas.
+   Each must be specific and able to confirm or refute your guess.
+   Bad: "What is the app?"  Good: "Which customer segment is listed as primary, and how big are they?"`;
 }
 
 /** Second turn: turn the streamed reasoning into the card JSON. */
 export const STRUCTURE_PROMPT = `Now fill in the JSON card from your reasoning above.
-- guess: "A ___ for ___ that helps them ___"
-- evidence_chain: 2-4 rows, each with the note IDs or answer IDs you cited (like N07 or A1), the evidence, and your inference
+- guess: one sentence "A [kind of product] for [users] that helps them [benefit]" with real words
+- evidence_chain: 2-4 rows, each with note_ids you cited, the evidence, and your inference
 - confidence: 0-100
-- unknowns: what the notes and answers still do not tell us
+- unknowns: what the notes do not tell us
+- rag_followup_questions: 3-5 specific questions
 Return only JSON.`;
 
-export const STRICT_PROMPT =
-  "Return only JSON matching the schema. Use the notes above. Keep each string under 30 words.";
+// =====================================================================
+// Both tabs — synthesis
+// =====================================================================
 
 export const SYNTH_SYSTEM_PROMPT = `You combine four detectives' guesses about a startup into one consensus and a plan for a prototype app.
 Rules:

@@ -1,13 +1,16 @@
 // Orchestrates retrieval, detective generation and synthesis — against Ollama or the mock.
-import { mockDetective, mockQuestions, mockStream, mockSynthesis } from "./mock";
+import { mockBlindGuess, mockDetective, mockQuestions, mockStream, mockSynthesis } from "./mock";
 import { chatJSON, chatStream, embed, hasModel, OllamaError, tags, type CallOpts } from "./ollama";
 import { personaById, PERSONAS, type Persona } from "./personas";
 import {
-  detectiveSystemPrompt, detectiveUserPrompt, QUESTIONS_STRUCTURE_PROMPT, questionsUserPrompt,
+  BLIND_STRUCTURE_PROMPT, blindGuessUserPrompt, blindQuestionsUserPrompt, blindSystemPrompt,
+  detectiveSystemPrompt, detectiveUserPrompt, QUESTIONS_STRUCTURE_PROMPT,
   STRICT_PROMPT, STRUCTURE_PROMPT, SYNTH_SYSTEM_PROMPT, synthUserPrompt,
 } from "./prompts";
 import { retrieveForPersona } from "./retrieve";
-import { coerceCard, coerceQuestions, coerceSynthesis, detectiveCardSchema, questionsSchema, synthesisSchema } from "./schema";
+import {
+  coerceCard, coerceQuestions, coerceSimCard, coerceSynthesis, detectiveCardSchema, questionsSchema, simCardSchema, synthesisSchema,
+} from "./schema";
 import type { ChatMessage, DetectiveCard, Note, PersonId, QA, Settings, SynthesisOutput } from "./types";
 
 export interface EngineCtx {
@@ -73,7 +76,7 @@ export async function planRetrieval(ctx: EngineCtx, notes: Note[]): Promise<Retr
 /** Stream the persona's reasoning, then a structured JSON pass; retry once with the strict prompt. */
 async function streamThenJSON<T>(
   ctx: EngineCtx,
-  persona: Persona,
+  systemPrompt: string,
   userPrompt: string,
   structurePrompt: string,
   format: object,
@@ -82,7 +85,7 @@ async function streamThenJSON<T>(
 ): Promise<{ rawText: string; value: T | null; error?: string }> {
   const s = ctx.settings;
   const base: ChatMessage[] = [
-    { role: "system", content: detectiveSystemPrompt(persona) },
+    { role: "system", content: systemPrompt },
     { role: "user", content: userPrompt },
   ];
   const rawText = await chatStream(
@@ -113,48 +116,53 @@ export interface QuestionsResult {
   error?: string;
 }
 
-/** Phase 1: questions for the RAG, no guess. */
-export async function runQuestions(
-  ctx: EngineCtx,
-  persona: Persona,
-  notes: Note[],
-  onToken: (t: string) => void,
-): Promise<QuestionsResult> {
+export interface DetectiveResult {
+  rawText: string;
+  card: DetectiveCard | null;
+  questions?: string[];
+  error?: string;
+}
+
+const cardError = (e?: string): string => `Invalid JSON after retry — fill the card by hand from the reasoning. (${e})`;
+
+/** Tab 1, phase 1: questions for the knowledge base, without seeing the canvas. */
+export async function runQuestions(ctx: EngineCtx, persona: Persona, onToken: (t: string) => void): Promise<QuestionsResult> {
   if (ctx.settings.mockMode) {
-    const { rawText, questions } = mockQuestions(persona, notes);
+    const { rawText, questions } = mockQuestions(persona);
     await mockStream(rawText, onToken, ctx.signal, ctx.mockDelayMs);
     return { rawText, questions };
   }
-  const r = await streamThenJSON(ctx, persona, questionsUserPrompt(notes), QUESTIONS_STRUCTURE_PROMPT, questionsSchema,
-    (v) => { const q = coerceQuestions(v); return q.length ? q : null; }, onToken);
+  const r = await streamThenJSON(ctx, blindSystemPrompt(persona), blindQuestionsUserPrompt(persona), QUESTIONS_STRUCTURE_PROMPT,
+    questionsSchema, (v) => { const q = coerceQuestions(v); return q.length ? q : null; }, onToken);
   return r.value
     ? { rawText: r.rawText, questions: r.value }
     : { rawText: r.rawText, questions: [], error: `Invalid JSON after retry — type the questions by hand. (${r.error})` };
 }
 
-export interface DetectiveResult {
-  rawText: string;
-  card: DetectiveCard | null;
-  error?: string;
-}
-
-/** Phase 2: the guess card, from the notes plus the RAG's answers. */
-export async function runDetective(
-  ctx: EngineCtx,
-  persona: Persona,
-  notes: Note[],
-  qa: QA[],
-  onToken: (t: string) => void,
-): Promise<DetectiveResult> {
+/** Tab 1, phase 2: the guess card, from the knowledge base's answers only. */
+export async function runBlindGuess(ctx: EngineCtx, persona: Persona, qa: QA[], onToken: (t: string) => void): Promise<DetectiveResult> {
   if (ctx.settings.mockMode) {
-    const { rawText, card } = mockDetective(persona, notes, qa);
+    const { rawText, card } = mockBlindGuess(persona, qa);
     await mockStream(rawText, onToken, ctx.signal, ctx.mockDelayMs);
     return { rawText, card };
   }
-  const r = await streamThenJSON(ctx, persona, detectiveUserPrompt(notes, qa), STRUCTURE_PROMPT, detectiveCardSchema, coerceCard, onToken);
+  const r = await streamThenJSON(ctx, blindSystemPrompt(persona), blindGuessUserPrompt(qa), BLIND_STRUCTURE_PROMPT,
+    detectiveCardSchema, coerceCard, onToken);
+  return r.value ? { rawText: r.rawText, card: r.value } : { rawText: r.rawText, card: null, error: cardError(r.error) };
+}
+
+/** Tab 2: the detective reads its notes, guesses, and proposes follow-up questions. */
+export async function runDetective(ctx: EngineCtx, persona: Persona, notes: Note[], onToken: (t: string) => void): Promise<DetectiveResult> {
+  if (ctx.settings.mockMode) {
+    const { rawText, card, questions } = mockDetective(persona, notes);
+    await mockStream(rawText, onToken, ctx.signal, ctx.mockDelayMs);
+    return { rawText, card, questions };
+  }
+  const r = await streamThenJSON(ctx, detectiveSystemPrompt(persona), detectiveUserPrompt(notes), STRUCTURE_PROMPT,
+    simCardSchema, coerceSimCard, onToken);
   return r.value
-    ? { rawText: r.rawText, card: r.value }
-    : { rawText: r.rawText, card: null, error: `Invalid JSON after retry — fill the card by hand from the reasoning. (${r.error})` };
+    ? { rawText: r.rawText, card: r.value.card, questions: r.value.questions }
+    : { rawText: r.rawText, card: null, error: cardError(r.error) };
 }
 
 // ---- Synthesis ----

@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parseMiroCsv } from "../src/lib/csv";
-import { planRetrieval, runDetective, runQuestions, synthesize } from "../src/lib/engine";
+import { planRetrieval, runBlindGuess, runDetective, runQuestions, synthesize } from "../src/lib/engine";
 import { ungroundedIds } from "../src/lib/grounding";
 import { PERSONAS } from "../src/lib/personas";
 import { stitchAiStudioPrompt } from "../src/lib/prompts";
@@ -22,13 +22,20 @@ describe.runIf(process.env.OLLAMA_LIVE)("live Ollama", () => {
       const log: string[] = [`# ${board}`, plan.notice ?? `embeddings: ${plan.usedEmbeddings}`];
       for (const p of PERSONAS) {
         const t0 = Date.now();
-        const q = await runQuestions(ctx, p, plan.byPerson[p.id], () => {});
+        // Tab 1: blind questions, then a guess from the answers only.
+        const q = await runQuestions(ctx, p, () => {});
         expect(q.questions.length).toBeGreaterThanOrEqual(1);
         // Stand-in for the R RAG: answer each question with two of this person's notes.
         const qa = q.questions.map((question, i) => ({ question, answer: plan.byPerson[p.id].slice(i, i + 2).map((n) => n.text).join(". ") }));
-        const res = await runDetective(ctx, p, plan.byPerson[p.id], qa, () => {});
-        const ids = [...plan.byPerson[p.id].map((n) => n.id), ...qa.map((_, i) => `A${i + 1}`)];
-        log.push(`\n## ${p.name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`, "### Questions", ...q.questions, q.error ?? "", "### Guess", res.rawText, "---",
+        const blind = await runBlindGuess(ctx, p, qa, () => {});
+        // Tab 2: the detective reads the notes directly.
+        const res = await runDetective(ctx, p, plan.byPerson[p.id], () => {});
+        const ids = plan.byPerson[p.id].map((n) => n.id);
+        log.push(`\n## ${p.name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`,
+          "### Tab 1 blind questions", ...q.questions, q.error ?? "",
+          "### Tab 1 guess from answers", JSON.stringify(blind.card?.guess), `error: ${blind.error ?? "none"}`,
+          `ungrounded (tab 1): ${blind.card ? [...ungroundedIds(blind.card, qa.map((_, i) => `A${i + 1}`))].join(",") : "-"}`,
+          "### Tab 2 simulation", res.rawText, `questions: ${JSON.stringify(res.questions)}`, "---",
           JSON.stringify(res.card, null, 1), `error: ${res.error ?? "none"}`,
           `ungrounded: ${res.card ? [...ungroundedIds(res.card, ids)].join(",") : "-"}`);
         expect(res.card).not.toBeNull();

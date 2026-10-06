@@ -1,6 +1,6 @@
 # BMC Detective
 
-A classroom guessing game. Upload another group's Business Model Canvas (Miro CSV export). Four AI detectives first ask questions for your R-based RAG, then use its answers to guess what the product is and show their evidence. Edit anything, then combine the guesses into a prompt for **Google AI Studio → Build**.
+A classroom guessing game. Upload another group's Business Model Canvas (Miro CSV export). Four AI detectives who can't see the canvas ask questions of your R-based RAG, then use its answers to guess what the product is. A second tab runs the full simulation, where the detectives read the canvas directly. Edit anything, then combine the guesses into a prompt for **Google AI Studio → Build**.
 
 Everything runs in the browser. The LLM calls go **straight from your browser to Ollama on your own laptop**. A Vercel server can't reach your laptop, so there's no backend.
 
@@ -12,12 +12,17 @@ npm run dev          # http://localhost:5173
 ```
 
 1. **Settings**: click **Test connection**. Or tick **Mock mode** to try everything without Ollama.
-2. **Upload** a Miro CSV, or click a sample board. Fix any notes marked *Unknown* and add redaction terms.
-3. **Questions**: click **Ask all**. Each detective writes 3–5 questions for your RAG, without guessing yet. Edit them, then **Download questions.R**.
-4. **In R**: `source("questions.R")`, ask your RAG each question, and save the answers as `answers.csv` with columns `person,question,answer`. There's a `write.csv` example at the end of `questions.R`.
+2. **Upload** a Miro CSV, or click a sample board. The canvas stays **hidden** so players can't peek. Click **Reveal** to check notes, fix blocks, or add redaction terms, and **Hide the canvas** to cover it again.
+
+**Tab 1 · Questions first.** The detectives never see the canvas.
+
+3. **Ask all**: each detective writes 3–5 questions for a knowledge base built from the canvas, through its own lens. Edit them, then **Download questions.R**.
+4. **In R**: `source("questions.R")`, ask your RAG each question, and save `answers.csv` with columns `person,question,answer`. There's a `write.csv` example at the end of `questions.R`.
 5. **Import answers.csv**: each answer appears under its question, and you can edit or paste answers by hand.
-6. **Four detectives**: click **Run all**. Each guess uses the notes plus the RAG's answers, cited as `[A1]`, `[A2]`. Edit the cards.
+6. **Four detectives → Run all**: each guesses from the answers only, citing them as `[A1]`, `[A2]`.
 7. **Synthesize**: copy the Google AI Studio prompt.
+
+**Tab 2 · Run the entire simulation.** The detectives read their notes directly, guess, and suggest follow-up questions, which this tab can also export as `questions.R`. Then synthesize.
 
 Your session autosaves in the browser. Use `session.json` to move it to another machine.
 
